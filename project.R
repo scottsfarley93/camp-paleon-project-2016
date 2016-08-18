@@ -470,11 +470,15 @@ save(out_needleaf_by_taxon, file="/Users/scottsfarley/documents/paleon/project/n
 save(out_treecover_by_taxon, file="/Users/scottsfarley/documents/paleon/project/treecover_full.RData")
 
 
-for (taxon in out_broadleaf_by_taxon){
-  pdf(paste(taxon, ".pdf"))
+
+for (ind in 1:length(names(out_broadleaf_by_taxon))){
+  taxon <- names(out_broadleaf_by_taxon)[[ind]]
+  print(taxon)
+  pdf(paste("BL", taxon, ".pdf", sep=""))
   par(mfrow=c(3, 2))
+  allRows <-  out_broadleaf_by_taxon[[taxon]]
   for (area in sourceAreas){
-    rows <- out_broadleaf_by_taxon[[taxon]][which(out[[taxon]]$SA == area), ]
+    rows <- out_broadleaf_by_taxon[[taxon]][which(out_broadleaf_by_taxon[[taxon]]$SA == area), ]
     plot(rows$pollen ~ rows$idw, col='red', main=paste(taxon, ":", area, "km"), xlim=c(0,1), ylim=c(0, 1), xlab="Broadleaf AVHRR Comp.", ylab=paste(taxon, "Pollen"))
     points(rows$pollen~ rows$idw2, col='green')
     points(rows$pollen ~ rows$simple, col='blue')
@@ -482,3 +486,93 @@ for (taxon in out_broadleaf_by_taxon){
   dev.off()
   print(paste("Done with: ", taxon))
 }
+
+library(R2jags)
+
+model <- function(){
+  ## inputs
+    ## dobs <- vector of distance observations
+    ## pObs <- vector(?) of observed pollen
+    ## lObs <- vector of observed landcover percentage
+    ## numCells <- number of gridcells  
+  
+  beta1 ~ dunif(0, 100) ## landcover observation error
+  beta2 ~ dunif(0, 100) ## spatial uncertainty in landcover locations
+  beta3 ~ dunif(0,100) ## pollen dispersal uncertainty
+  beta4 ~ dunif(0, 100) ## pollen observation error
+  beta5 ~ dunif(0, 100)
+  
+  ## the model
+  for (i in 1:numCells){
+    d[i] ~ dnorm(dObs[i], beta2)
+    L[i] ~ dnorm(lObs[i], beta1)
+    p_cell[i] ~ dnorm(((1/d[i])*L[i])/(1/d[i]), beta5)
+  }
+  P_total <- sum(p_cell)
+  Pobs ~ dnorm(P, beta4)
+  P ~ dnorm(P_total, beta3)
+}
+
+ind <- 1
+area <- 25
+dataset <- downloads[[ind]]
+lat <- dataset$dataset$site.data$lat
+lng <- dataset$dataset$site.data$long
+siteName <- dataset$dataset$site.data$site.name
+point <- as.matrix(data.frame(x=lng, y=lat))
+gridpoints <- as.matrix(tree.cover.points.2[c("x", "y")])
+counts <- dataset$counts
+compiled <- data.frame(compile_taxa(counts, "P25"))
+compiled$total <- rowSums(compiled)
+compiled <- compiled/compiled$total
+aggregated <- aggregateToTypes(compiled)
+
+dist <- rdist.earth(point, gridpoints)
+matches <- which(dist <= area)
+distMatches <- as.vector(dist[matches])
+tcMatches <- as.data.frame(tree.cover.points.2[matches,])$na.latlong.treecover
+pObs <- aggregated$tree.sum
+numCells <- length(distMatches)
+
+
+tree.cover.jags <- jags(data = list(dObs = distMatches, pObs = pObs, numCells = numCells, lObs = tcMatches), 
+            parameters.to.save = c('P', 'beta1', 'beta2', 'beta3', 'beta4', 'beta5'), 
+            n.chains = 5, n.iter = 10000, n.burnin = 2000, 
+            model.file = model, DIC = FALSE)
+
+
+
+rStar <- as.matrix(data.frame(broadleaf.100$idw, needleleaf.100$idw))
+nSites <- nrow(rStar)
+y <- as.matrix(data.frame(broadleaf.100$pollen, needleleaf.100$pollen))
+
+model <- function(){
+  betaB ~ dunif(0, 1000)
+  betaN ~ dunif(0, 100)
+  
+  
+  for (i in 1:nSites){
+    r[i, 1] <- rStar[i, 1]  * betaB
+    r[i, 2] <- rStar[i, 2] * betaN
+    y[i,] ~ ddirch(r[i,])
+  }
+}
+
+comp.jags <- jags(data = list(rStar = rStar, nSites = nSites, y=y), 
+                        parameters.to.save = c("betaB", "betaN"), 
+                        n.chains = 2, n.iter = 2000, n.burnin = 1000, 
+                        model.file = model, DIC = FALSE)
+
+
+
+c1 <- as.mcmc(comp.jags)[[1]]
+c2 <- as.mcmc(comp.jags)[[2]]
+
+plot(c1)
+
+rStar2 <- data.frame(as.numeric(broadleaf.100$idw), as.numeric(needleleaf.100$idw))
+rStar2[,1] <- rStar2[,1] * 2.267
+rStar2[,2] <- rStar2[,2] * 3.879
+plot(rStar2[,1], broadleaf.100$pollen)
+points(rStar2[,2], needleleaf.100$pollen, xlim=c(0,1), ylim=c(0,1), 
+       xlab="Corrected IDW AVHRR", ylab="Pollen", col='red')
