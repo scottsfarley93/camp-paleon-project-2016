@@ -52,15 +52,9 @@ tree.cover <- mask(tree.cover, wiBounds)
 
 writeRaster(needleleaf, "wi-needleleaf.grd", overwrite=TRUE)
 writeRaster(broadleaf, "wi-broadleaf.grd", overwrite=TRUE)
-writeRaster(evergreen, 'wi-evergreen.grd',overwrite=TRUE)
+writeRaster(evergreen, 'wi-evergreen.grd', overwrite=TRUE)
 writeRaster(deciduous, 'wi-deciduous.grd', overwrite=TRUE)
 writeRaster(tree.cover, 'wi-treecover.grd', overwrite=TRUE)
-
-broadleaf <- raster("wi-broadleaf.grd")
-needleleaf <-raster("wi-needleleaf.grd")
-evergreen <- raster("wi-evergreen.grd")
-deciduous <- raster("wi-deciduous.grd")
-tree.cover <- raster("wi-treecover.grd")
 
 
 
@@ -342,9 +336,8 @@ plot(tree.cover.200$pollen, tree.cover.200$idw, col='red', main='Tree Cover: 200
 points(tree.cover.200$pollen, tree.cover.200$idw2, col='green')
 points(tree.cover.200$pollen, tree.cover.200$simple, col='blue')
 
-#plot(tree.cover, main="Tree Cover")
+plot(tree.cover, main="Tree Cover")
 
-title()
 
 par(mfrow=c(3, 2))
 plot(broadleaf.25$pollen, broadleaf.25$idw, col='red', main='Broadleaf Cover: 25km', xlim=c(0,1), ylim=c(0, 1))
@@ -366,7 +359,7 @@ points(broadleaf.100$pollen, broadleaf.100$simple, col='blue')
 plot(broadleaf.200$pollen, broadleaf.200$idw, col='red', main='Broadleaf Cover: 200km', xlim=c(0,1), ylim=c(0, 1))
 points(broadleaf.200$pollen, broadleaf.200$idw2, col='green')
 points(broadleaf.200$pollen, broadleaf.200$simple, col='blue')
-#plot(broadleaf, main="Broadleaf")
+plot(broadleaf, main="Broadleaf")
 
 par(mfrow=c(3, 2))
 plot(needleleaf.25$pollen, needleleaf.25$idw, col='red', main='Needleleaf Cover: 25km', xlim=c(0,1), ylim=c(0, 1))
@@ -390,3 +383,102 @@ points(needleleaf.200$pollen, needleleaf.200$idw2, col='green')
 points(needleleaf.200$pollen, needleleaf.200$simple, col='blue')
 plot(needleleaf, main="Needleleaf")
 
+
+sourceAreas <- c(25, 50, 75, 100, 150, 200)
+out_broadleaf_by_taxon <- list()
+out_needleaf_by_taxon <- list()
+out_treecover_by_taxon <- list()
+for (taxon in names(compiled)){
+  df <-  data.frame(idw=vector(length=length(downloads)), idw2=vector(length=length(downloads)),simple=vector(length=length(downloads)),pollen=vector(length=length(downloads)), numGridcells = vector(length=length(downloads)), siteName = vector(length=length(downloads)), SA=vector(length=length(downloads)))
+  out_broadleaf_by_taxon[[taxon]] = df
+  out_needleaf_by_taxon[[taxon]] = df
+  out_treecover_by_taxon[[taxon]] = df
+}
+overAllInd <- 0
+SAInd <- 0
+for (area in sourceAreas){
+  SAInd <- SAInd + 1
+  for (ind in 1:length(downloads)){
+    dataset <- downloads[[ind]]
+    lat <- dataset$dataset$site.data$lat
+    lng <- dataset$dataset$site.data$long
+    siteName <- dataset$dataset$site.data$site.name
+    point <- as.matrix(data.frame(x=lng, y=lat))
+    gridpoints <- as.matrix(tree.cover.points.2[c("x", "y")])
+    counts <- dataset$counts
+    theCounts[[ind]] <- counts
+    compiled <- data.frame(compile_taxa(counts, "P25"))
+    compiled$total <- rowSums(compiled)
+    compiled <- compiled/compiled$total
+    theCompiled[[ind]] <- compiled
+    aggregated <- aggregateToTypes(compiled)
+    theAggregated[[ind]] <- aggregated
+    pollenTreeCover <- aggregated$tree.sum
+    pollenBroadleaf <- aggregated$broadleaf
+    pollenNeedleleaf <- aggregated$needleleaf
+    dist <- rdist.earth(point, gridpoints)
+    matches <- which(dist <= area)
+    distMatches <- dist[matches]
+    tcMatches <- tree.cover.points.2[matches,]
+    for (taxon in names(out_treecover_by_taxon)){
+      taxonPollen <- compiled[[taxon]]
+      if(is.null(taxonPollen)){
+        taxonPollen <- NA
+      }
+      broadleafMatches <- broadleaf.points.2[matches,]
+      mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf, dist=distMatches)
+      needleleafMatches <- needleleaf.points.2[matches,]
+      tree.cover.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=tcMatches$na.latlong.treecover, dist=distMatches)
+      broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf, dist=distMatches)
+      needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf, dist=distMatches)
+      ##do simple averaging
+      tree.cover.simple <- mean(tree.cover.mesh$gridValue) / 100
+      broadleaf.simple <- mean(broadleaf.mesh$gridValue) / 100
+      needleleaf.simple <- mean(needleleaf.mesh$gridValue) / 100
+      ##do IDW
+      tree.cover.idw <- sum(tree.cover.mesh$gridValue/tree.cover.mesh$dist)/sum(1/tree.cover.mesh$dist)/100
+      broadleaf.idw <- sum(broadleaf.mesh$gridValue/broadleaf.mesh$dist)/sum(1/broadleaf.mesh$dist)/100
+      needleleaf.idw <- sum(needleleaf.mesh$gridValue/needleleaf.mesh$dist)/sum(1/needleleaf.mesh$dist)/100
+
+      ##do IDW^2
+      tree.cover.idw2 <- sum(tree.cover.mesh$gridValue/(tree.cover.mesh$dist^2))/sum((1/tree.cover.mesh$dist^2))/100
+      broadleaf.idw2 <- sum(broadleaf.mesh$gridValue/(broadleaf.mesh$dist^2))/sum((1/broadleaf.mesh$dist^2))/100
+      needleleaf.idw2 <- sum(needleleaf.mesh$gridValue/(needleleaf.mesh$dist^2))/sum((1/needleleaf.mesh$dist^2))/100
+
+
+      numCells <- length(matches)
+      # dfInd <- SAInd * ind
+      # print(dfInd)
+      ## record the output
+      treeV <- c(tree.cover.idw, tree.cover.idw2, tree.cover.simple, taxonPollen, numCells, siteName, area)
+      broadleafV <- c(broadleaf.idw, broadleaf.idw2, broadleaf.simple, taxonPollen, numCells, siteName, area)
+      needleleafV <- c(needleleaf.idw, needleleaf.idw2, needleleaf.simple, taxonPollen, numCells, siteName, area)
+      print(treeV)
+      out_treecover_by_taxon[[taxon]][overAllInd, ] <- treeV
+      out_broadleaf_by_taxon[[taxon]][overAllInd, ] <- broadleafV
+      out_needleaf_by_taxon[[taxon]][overAllInd, ] <- needleleafV
+    }
+    overAllInd <- overAllInd + 1
+    # 
+  }
+}
+
+
+
+save(out_broadleaf_by_taxon, file="/Users/scottsfarley/documents/paleon/project/broadleaf_full.RData")
+save(out_needleaf_by_taxon, file="/Users/scottsfarley/documents/paleon/project/needleleaf_full.RData")
+save(out_treecover_by_taxon, file="/Users/scottsfarley/documents/paleon/project/treecover_full.RData")
+
+
+for (taxon in out_broadleaf_by_taxon){
+  pdf(paste(taxon, ".pdf"))
+  par(mfrow=c(3, 2))
+  for (area in sourceAreas){
+    rows <- out_broadleaf_by_taxon[[taxon]][which(out[[taxon]]$SA == area), ]
+    plot(rows$pollen ~ rows$idw, col='red', main=paste(taxon, ":", area, "km"), xlim=c(0,1), ylim=c(0, 1), xlab="Broadleaf AVHRR Comp.", ylab=paste(taxon, "Pollen"))
+    points(rows$pollen~ rows$idw2, col='green')
+    points(rows$pollen ~ rows$simple, col='blue')
+  }
+  dev.off()
+  print(paste("Done with: ", taxon))
+}
