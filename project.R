@@ -244,7 +244,7 @@ for (area in sourceAreas){
     theCounts[[ind]] <- counts
     compiled <- data.frame(compile_taxa(counts, "P25"))
     compiled$total <- rowSums(compiled)
-    compiled <- compiled/compiled$total
+    #compiled <- compiled/compiled$total
     theCompiled[[ind]] <- compiled
     aggregated <- aggregateToTypes(compiled)
     theAggregated[[ind]] <- aggregated
@@ -258,8 +258,8 @@ for (area in sourceAreas){
     broadleafMatches <- broadleaf.points.2[matches,]
     needleleafMatches <- needleleaf.points.2[matches,]
     tree.cover.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=tcMatches$na.latlong.treecover, dist=distMatches)
-    broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf, dist=distMatches)
-    needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf, dist=distMatches)
+    broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf/(broadleafMatches$na.latlong.broadleaf + needleleafMatches$na.latlong.needleleaf), dist=distMatches)
+    needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf/(broadleafMatches$na.latlong.broadleaf + needleleafMatches$na.latlong.needleleaf), dist=distMatches)
     ##do simple averaging
     tree.cover.simple <- mean(tree.cover.mesh$gridValue) / 100
     broadleaf.simple <- mean(broadleaf.mesh$gridValue) / 100
@@ -429,8 +429,8 @@ for (area in sourceAreas){
       mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf, dist=distMatches)
       needleleafMatches <- needleleaf.points.2[matches,]
       tree.cover.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=tcMatches$na.latlong.treecover, dist=distMatches)
-      broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf, dist=distMatches)
-      needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf, dist=distMatches)
+      broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf/(broadleafMatches$na.latlong.broadleaf + needleleafMatches$na.latlong.needleleaf), dist=distMatches)
+      needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf/(broadleafMatches$na.latlong.broadleaf + needleleafMatches$na.latlong.needleleaf), dist=distMatches)
       ##do simple averaging
       tree.cover.simple <- mean(tree.cover.mesh$gridValue) / 100
       broadleaf.simple <- mean(broadleaf.mesh$gridValue) / 100
@@ -542,25 +542,28 @@ tree.cover.jags <- jags(data = list(dObs = distMatches, pObs = pObs, numCells = 
 
 
 
-rStar <- as.matrix(data.frame(broadleaf.100$idw, needleleaf.100$idw))
-nSites <- nrow(rStar)
-y <- as.matrix(data.frame(broadleaf.100$pollen, needleleaf.100$pollen))
+total <- (as.integer(needleleaf.100$pollen) + as.numeric(broadleaf.100$pollen))
+rStar <- as.numeric(needleleaf.100$idw)
+
+nSites <- length(rStar)
+y <- as.integer(needleleaf.100$pollen)
+
+
 
 model <- function(){
-  betaB ~ dunif(0, 1000)
-  betaN ~ dunif(0, 100)
-  
-  
+  beta1 ~ dnorm(0, 0.0001)
+  beta0 ~ dnorm(0, 0.0001)
+  sigma ~ dunif(0.0001, 10000)
+  sigma2Inv <- 1/(sigma*sigma)
   for (i in 1:nSites){
-    r[i, 1] <- rStar[i, 1]  * betaB
-    r[i, 2] <- rStar[i, 2] * betaN
-    y[i,] ~ ddirch(r[i,])
+    y[i] ~ dbin(p[i], total[i])
+    p[i] <- ilogit(r[i])
+    r[i] ~ dnorm(rStar[i]*beta1 + beta0, sigma2Inv)
   }
 }
-
-comp.jags <- jags(data = list(rStar = rStar, nSites = nSites, y=y), 
-                        parameters.to.save = c("betaB", "betaN"), 
-                        n.chains = 2, n.iter = 2000, n.burnin = 1000, 
+comp.jags <- jags(data = list(rStar = rStar, nSites = nSites, y=y, total=total), 
+                        parameters.to.save = c("beta1", "beta0", "p"), 
+                        n.chains = 1, n.iter = 10000, n.burnin = 1000, 
                         model.file = model, DIC = FALSE)
 
 
@@ -569,10 +572,60 @@ c1 <- as.mcmc(comp.jags)[[1]]
 c2 <- as.mcmc(comp.jags)[[2]]
 
 plot(c1)
+new_names <- character(length=length(names(p)))
+for (i in names(p)){
+  name <- names(p)[i]
+  name <- re
+}
 
 rStar2 <- data.frame(as.numeric(broadleaf.100$idw), as.numeric(needleleaf.100$idw))
-rStar2[,1] <- rStar2[,1] * 2.267
-rStar2[,2] <- rStar2[,2] * 3.879
-plot(rStar2[,1], broadleaf.100$pollen)
-points(rStar2[,2], needleleaf.100$pollen, xlim=c(0,1), ylim=c(0,1), 
+rStar2[,1] <- rStar2[,1] * mean(c1[, "betaB"])
+rStar2[,2] <- rStar2[,2] * mean(c1[, "betaN"]) + mean(c1[, "betaC"])
+print(mean(c1[, "betaB"]))
+print(mean(c1[, "betaN"]))
+title("Model #1: Corrected")
+plot(rStar2[,1], broadleaf.100$pollen, xlim=c(0,1), ylim=c(0,1), 
        xlab="Corrected IDW AVHRR", ylab="Pollen", col='red')
+points(rStar2[,2], needleleaf.100$pollen, xlim=c(0,1), ylim=c(0,1), 
+       xlab="Corrected IDW AVHRR", ylab="Pollen", col='blue')
+abline(0,1)
+points(needleleaf.100$idw, needleleaf.100$pollen, col='lightblue')
+points(broadleaf.100$idw, broadleaf.100$pollen, col='pink')
+#legend("topright", "", c("Corrected Broadleaf", "Uncorrected Broadleaf", "Corrected Needleleaf", "Uncorrected Needleleaf"), fill=c("red", "pink", "blue", "lightblue"))
+
+
+model2 <- function(){
+  betaB ~ dnorm(0, 0.0001) ## broadleaf effect
+  betaN ~ dnorm(0, 0.0001) ## needleleaf effect
+  for (i in 1:nSites){
+    betai[i] ~ dunif(0, 10000) ## site level random effect
+    r[i, 1] <- rStar[i, 1]  * betaB ## give each site a broadleaf correction
+    r[i, 2] <- rStar[i, 2] * betaN ## give each site a needleleaf correction
+    ri[i, 1] ~ dlnorm(r[i, 1], 1/betai[i]) ## give the broadleafs a site-level random effect 
+    ri[i, 2] ~ dlnorm(r[i, 2], 1/betai[i]) ## give the needleleafs a site-level random effect
+    y[i,] ~ ddirch(ri[i,]) ## give the composition of the site a multi-nomial distribution that sums to one
+  }
+}
+
+comp.jags.2 <- jags(data = list(rStar = rStar, nSites = nSites, y=y), 
+                  parameters.to.save = c("betaB", "betaN", "betai"), 
+                  n.chains = 1, n.iter = 10000, n.burnin = 2500, n.thin=10,
+                  model.file = model2, DIC = FALSE)
+
+
+c1 <- as.mcmc(comp.jags.2)[[1]]
+c2 <- as.mcmc(comp.jags.2)[[2]]
+
+rStar2 <- data.frame(as.numeric(broadleaf.100$idw), as.numeric(needleleaf.100$idw))
+rStar2[,1] <- rStar2[,1] * mean(c1[, "betaB"])
+rStar2[,2] <- rStar2[,2] * mean(c1[, "betaN"])
+title("Model #2: Corrected")
+plot(rStar2[,2], broadleaf.100$pollen, xlim=c(0,1), ylim=c(0,1), 
+     xlab="Corrected IDW AVHRR", ylab="Pollen", col='red')
+points(rStar2[,2], needleleaf.100$pollen, xlim=c(0,1), ylim=c(0,1), 
+       xlab="Corrected IDW AVHRR", ylab="Pollen", col='blue')
+# abline(0,1)
+plot(needleleaf.100$idw, needleleaf.100$pollen, col='pink')
+points(broadleaf.100$idw, broadleaf.100$pollen, col='lightblue')
+legend("topright", "", c("Corrected Broadleaf", "Uncorrected Broadleaf", "Corrected Needleleaf", "Uncorrected Needleleaf"), fill=c("red", "pink", "blue", "lightblue"))
+
