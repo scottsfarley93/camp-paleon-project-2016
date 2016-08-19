@@ -224,7 +224,7 @@ needleleaf.points.2 <- data.frame(rasterToPoints(needleleaf))
 # hist(broadleaf_out$numGridcells)
 # 
 
-sourceAreas <- c(25, 50, 75, 100, 150, 200)
+sourceAreas <- c(100)
 broadleaf_out <- data.frame(idw=vector(length=length(downloads)),idw2=vector(length=length(downloads)),simple=vector(length=length(downloads)), pollen=vector(length=length(downloads)), numGridcells = vector(length=length(downloads)), siteName = vector(length=length(downloads)),  SA=vector(length=length(downloads)))
 tree.cover_out <- data.frame(idw=vector(length=length(downloads)), idw2=vector(length=length(downloads)),simple=vector(length=length(downloads)),pollen=vector(length=length(downloads)), numGridcells = vector(length=length(downloads)), siteName = vector(length=length(downloads)), SA=vector(length=length(downloads)))
 needleleaf_out <- data.frame(idw=vector(length=length(downloads)), idw2=vector(length=length(downloads)),simple=vector(length=length(downloads)),pollen=vector(length=length(downloads)), numGridcells = vector(length=length(downloads)), siteName = vector(length=length(downloads)), SA=vector(length=length(downloads)))
@@ -258,8 +258,8 @@ for (area in sourceAreas){
     broadleafMatches <- broadleaf.points.2[matches,]
     needleleafMatches <- needleleaf.points.2[matches,]
     tree.cover.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=tcMatches$na.latlong.treecover, dist=distMatches)
-    broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf/(broadleafMatches$na.latlong.broadleaf + needleleafMatches$na.latlong.needleleaf), dist=distMatches)
-    needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf/(broadleafMatches$na.latlong.broadleaf + needleleafMatches$na.latlong.needleleaf), dist=distMatches)
+    broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf, dist=distMatches)
+    needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf, dist=distMatches)
     ##do simple averaging
     tree.cover.simple <- mean(tree.cover.mesh$gridValue) / 100
     broadleaf.simple <- mean(broadleaf.mesh$gridValue) / 100
@@ -384,7 +384,7 @@ points(needleleaf.200$pollen, needleleaf.200$simple, col='blue')
 plot(needleleaf, main="Needleleaf")
 
 
-sourceAreas <- c(25, 50, 75, 100, 150, 200)
+sourceAreas <- c(100)
 out_broadleaf_by_taxon <- list()
 out_needleaf_by_taxon <- list()
 out_treecover_by_taxon <- list()
@@ -429,8 +429,8 @@ for (area in sourceAreas){
       mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf, dist=distMatches)
       needleleafMatches <- needleleaf.points.2[matches,]
       tree.cover.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=tcMatches$na.latlong.treecover, dist=distMatches)
-      broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf/(broadleafMatches$na.latlong.broadleaf + needleleafMatches$na.latlong.needleleaf), dist=distMatches)
-      needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf/(broadleafMatches$na.latlong.broadleaf + needleleafMatches$na.latlong.needleleaf), dist=distMatches)
+      broadleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=broadleafMatches$na.latlong.broadleaf, dist=distMatches)
+      needleleaf.mesh <- data.frame(x=tcMatches$x, y=tcMatches$y, gridValue=needleleafMatches$na.latlong.needleleaf, dist=distMatches)
       ##do simple averaging
       tree.cover.simple <- mean(tree.cover.mesh$gridValue) / 100
       broadleaf.simple <- mean(broadleaf.mesh$gridValue) / 100
@@ -543,7 +543,10 @@ tree.cover.jags <- jags(data = list(dObs = distMatches, pObs = pObs, numCells = 
 
 
 total <- (as.integer(needleleaf.100$pollen) + as.numeric(broadleaf.100$pollen))
-rStar <- as.numeric(needleleaf.100$idw)
+
+n <- needleleaf.100
+n$idw <- as.numeric(n$idw) / (as.numeric(n$idw) + as.numeric(broadleaf.100$idw))
+rStar <- as.numeric(n$idw)
 
 nSites <- length(rStar)
 y <- as.integer(needleleaf.100$pollen)
@@ -570,6 +573,21 @@ comp.jags <- jags(data = list(rStar = rStar, nSites = nSites, y=y, total=total),
 
 c1 <- as.mcmc(comp.jags)[[1]]
 c2 <- as.mcmc(comp.jags)[[2]]
+
+
+p <- colMeans(as.data.frame(c1))
+p <- p[3:length(p)]
+
+names(p) <- sapply(names(p), function(n){
+  print(n)
+    new <- gsub("p\\[", "", n)
+    new <- gsub("]", "", new)
+    return(new)
+  })
+
+
+idx <- sort(as.numeric(names(p)), index.return=T)$ix
+p <- p[idx]
 
 plot(c1)
 new_names <- character(length=length(names(p)))
@@ -629,3 +647,32 @@ plot(needleleaf.100$idw, needleleaf.100$pollen, col='pink')
 points(broadleaf.100$idw, broadleaf.100$pollen, col='lightblue')
 legend("topright", "", c("Corrected Broadleaf", "Uncorrected Broadleaf", "Corrected Needleleaf", "Uncorrected Needleleaf"), fill=c("red", "pink", "blue", "lightblue"))
 
+
+needleLocs <- data.frame(x=vector(), y=vector(), pollen=vector())
+broadLocs <- data.frame(x=vector(), y=vector(), pollen=vector())
+for (ind in 1:length(downloads)){
+  agg <- theAggregated[[ind]]
+  needles <- agg$needleleaf
+  broads <- agg$broadleaf
+  dataset <- downloads[[ind]]
+  lat <- dataset$dataset$site.data$lat
+  lng <- dataset$dataset$site.data$long
+  print(lat)
+  print(lng)
+  print(needles)
+  vN <- c(lng, lat, needles)
+  vB <- c(lng, lat, broads)
+  needleLocs[ind,] <- vN
+  broadLocs[ind,] <- vB
+}
+
+plot(broadleaf)
+points(broadLocs$x, broadLocs$y, col=terrain.colors(broadLocs$pollen), pch=15)
+points(broadLocs$x, broadLocs$y, pch=15, cex=0.25)
+title("Broadleaf")
+
+
+plot(needleleaf)
+points(needleLocs$x, needleLocs$y, col=terrain.colors(needleLocs$pollen), pch=15)
+points(broadLocs$x, broadLocs$y, pch=15, cex=0.25)
+title("Needleleaf")
