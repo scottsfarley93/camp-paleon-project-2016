@@ -14,3 +14,21 @@
 4. 100km
 5. 150km
 6.  200km
+
+## Calibration model
+
+$$ 
+y_i \sim \text{binomial}(n_i, p_i)
+$$
+$$
+p_i = \text{inverse-logit}(r_i)
+$$
+$$
+r_i \sim normal(\beta_0 + \beta_1 \cdot r^*_i, \sigma)
+$$
+$$
+\beta_k \sim \text{normal}(0, 100), k \in [0,1]
+$$
+$$
+\sigma \sim \text{uniform}(0,10)
+$$
